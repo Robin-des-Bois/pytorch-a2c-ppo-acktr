@@ -31,7 +31,11 @@ def init_normc_(weight, gain=1):
 
 def update_current_obs(obs, current_obs, obs_shape, num_stack):
     shape_dim0 = obs_shape[0]
-    obs = torch.from_numpy(obs).float()
+    if isinstance(obs, torch.Tensor):
+        pass
+    else:
+        obs = torch.from_numpy(obs)
+    obs = obs.float()
     if num_stack > 1:
         current_obs[:, :-shape_dim0] = current_obs[:, shape_dim0:]
     current_obs[:, -shape_dim0:] = obs

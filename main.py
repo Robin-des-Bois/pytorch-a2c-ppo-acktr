@@ -1,3 +1,13 @@
+import os
+import sys
+
+import space_mapper
+from dict_model import DictPolicy
+
+root_dir = os.path.abspath(os.path.join(os.path.dirname('file'), '..'))
+sys.path.insert(0, root_dir)
+
+
 import copy
 import glob
 import os
@@ -24,6 +34,7 @@ import algo
 
 
 args = get_args()
+print(args)
 
 assert args.algo in ['a2c', 'ppo', 'acktr']
 if args.recurrent_policy:
@@ -55,30 +66,43 @@ def main():
         from visdom import Visdom
         viz = Visdom(port=args.port)
         win = None
-
-    envs = [make_env(args.env_name, args.seed, i, args.log_dir, args.add_timestep)
+    map_to_discrete = True
+    time_limit = 20
+    envs = [make_env(args.env_name, args.seed, i, args.log_dir, args.add_timestep, map_to_discrete, time_limit)
                 for i in range(args.num_processes)]
+
+    space_mapper.space_mapper_test()
 
     if args.num_processes > 1:
         envs = SubprocVecEnv(envs)
     else:
         envs = DummyVecEnv(envs)
 
-    if len(envs.observation_space.shape) == 1:
-        envs = VecNormalize(envs, gamma=args.gamma)
+
 
     obs_shape = envs.observation_space.shape
-    obs_shape = (obs_shape[0] * args.num_stack, *obs_shape[1:])
-
-    actor_critic = Policy(obs_shape, envs.action_space, args.recurrent_policy)
-
-    if envs.action_space.__class__.__name__ == "Discrete":
-        action_shape = 1
+    if map_to_discrete:
+        unwrapped = envs.envs[0].unwrapped
+        mapper = space_mapper.TorchDictSpaceMapper(
+            unwrapped.observation_space
+        ) # type: space_mapper.TorchDictSpaceMapper
+        actor_critic = DictPolicy(mapper, envs.action_space, args.recurrent_policy)
     else:
-        action_shape = envs.action_space.shape[0]
+        if len(envs.observation_space.shape) == 1:
+            envs = VecNormalize(envs, gamma=args.gamma)
+        actor_critic = Policy(obs_shape, envs.action_space, args.recurrent_policy)
+
+
+
+    action_shape = envs.action_space.shape
 
     if args.cuda:
         actor_critic.cuda()
+    else:
+        print("#######")
+        print(
+            "WARNING: Cuda not enabled. troch.cuda.is_available(): ", torch.cuda.is_available())
+        print("#######")
 
     if args.algo == 'a2c':
         agent = algo.A2C_ACKTR(actor_critic, args.value_loss_coef,
@@ -94,11 +118,13 @@ def main():
         agent = algo.A2C_ACKTR(actor_critic, args.value_loss_coef,
                                args.entropy_coef, acktr=True)
 
+
     rollouts = RolloutStorage(args.num_steps, args.num_processes, obs_shape, envs.action_space, actor_critic.state_size)
     current_obs = torch.zeros(args.num_processes, *obs_shape)
 
     obs = envs.reset()
-    update_current_obs(obs, current_obs, obs_shape, args.num_stack)
+    obs = torch.tensor(obs)
+    update_current_obs(torch.tensor(obs), current_obs, obs_shape, 1)
 
     rollouts.observations[0].copy_(current_obs)
 
@@ -123,6 +149,9 @@ def main():
 
             # Obser reward and next obs
             obs, reward, done, info = envs.step(cpu_actions)
+            if isinstance(envs, DummyVecEnv) and done[0]:
+                envs.reset()
+            obs = torch.tensor(obs)
             reward = torch.from_numpy(np.expand_dims(np.stack(reward), 1)).float()
             episode_rewards += reward
 
@@ -165,6 +194,7 @@ def main():
             save_model = actor_critic
             if args.cuda:
                 save_model = copy.deepcopy(actor_critic).cpu()
+
 
             save_model = [save_model,
                             hasattr(envs, 'ob_rms') and envs.ob_rms or None]
