@@ -1,9 +1,6 @@
 import os
 import sys
 
-import space_mapper
-from dict_model import DictPolicy
-
 root_dir = os.path.abspath(os.path.join(os.path.dirname('file'), '..'))
 sys.path.insert(0, root_dir)
 
@@ -19,7 +16,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
+import space_mapper
+from dict_model import DictPolicy
 from arguments import get_args
 from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv
@@ -82,7 +80,8 @@ def main():
 
     obs_shape = envs.observation_space.shape
     if map_to_discrete:
-        unwrapped = envs.envs[0].unwrapped
+        env = make_env(args.env_name, args.seed, 0, args.log_dir, args.add_timestep, map_to_discrete, time_limit)()
+        unwrapped = env.unwrapped
         mapper = space_mapper.TorchDictSpaceMapper(
             unwrapped.observation_space
         ) # type: space_mapper.TorchDictSpaceMapper
